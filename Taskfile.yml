@@ -1,0 +1,54 @@
+version: '3'
+
+vars:
+  OUT: out
+  BINARY: out/tinyrenderer
+  PROFILE: out/cpu.prof
+  TESTBIN: out/tinyrenderer.test
+  BENCH: '{{.BENCH | default "."}}'
+  PORT: '{{.PORT | default "8080"}}'
+
+tasks:
+  build:
+    desc: Build the renderer binary into out/
+    cmds:
+      - mkdir -p {{.OUT}}
+      - go build -o {{.BINARY}} .
+    sources:
+      - '*.go'
+    generates:
+      - '{{.BINARY}}'
+
+  run:
+    desc: Build and run the renderer (writes out/framebuffer.tga)
+    deps: [build]
+    cmds:
+      - ./{{.BINARY}}
+
+  bench:
+    desc: 'Run benchmarks (override: task bench BENCH=BenchmarkLine$)'
+    cmds:
+      - go test -bench={{.BENCH}} -benchmem
+
+  profile:
+    desc: 'Capture CPU profile (override: task profile BENCH=BenchmarkLine$)'
+    cmds:
+      - mkdir -p {{.OUT}}
+      - go test -bench={{.BENCH}} -benchtime=3s -cpuprofile={{.PROFILE}} -o {{.TESTBIN}}
+
+  pprof:
+    desc: Open the CPU profile in the browser (needs graphviz)
+    deps: [profile]
+    cmds:
+      - go tool pprof -http=:{{.PORT}} {{.PROFILE}}
+
+  pprof:top:
+    desc: Print the hottest functions from the captured profile
+    deps: [profile]
+    cmds:
+      - go tool pprof -top -nodecount=15 {{.PROFILE}}
+
+  clean:
+    desc: Remove all generated artifacts
+    cmds:
+      - rm -rf {{.OUT}}
