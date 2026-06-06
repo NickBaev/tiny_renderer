@@ -53,8 +53,19 @@ func (img *TGAImage) Set(x, y int, c TGAColor) {
 		return
 	}
 	idx := (x + y*img.width) * int(img.format)
-	bytes := []byte{c.B, c.G, c.R, c.A}
-	copy(img.data[idx:idx+int(img.format)], bytes[:img.format])
+	switch img.format {
+	case Grayscale:
+		img.data[idx] = c.B
+	case RGB:
+		img.data[idx] = c.B
+		img.data[idx+1] = c.G
+		img.data[idx+2] = c.R
+	case RGBA:
+		img.data[idx] = c.B
+		img.data[idx+1] = c.G
+		img.data[idx+2] = c.R
+		img.data[idx+3] = c.A
+	}
 }
 
 // Get возвращает цвет пикселя (x, y).
