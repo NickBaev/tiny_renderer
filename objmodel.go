@@ -4,61 +4,65 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
 )
 
-type Vertex struct {
-	X, Y, Z float64
-}
-
-type Face struct {
-	first, second, third int
-}
-
 type Model struct {
-	vertices []Vertex
-	faces    []Face
+	verts []Vec3   // массив вершин
+	faces [][3]int // индексы вершин каждого треугольника
 }
 
-func readModel(filename string) *Model {
-	model := &Model{}
+func readModel(filename string) (*Model, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer file.Close()
 
+	model := &Model{}
 	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
+	for lineNo := 1; scanner.Scan(); lineNo++ {
 		line := scanner.Text()
-		if len(line) == 0 {
-			continue
-		}
-		switch line[0] {
-		case 'v':
-			if line[1] == ' ' {
-				var x, y, z float64
-				_, err := fmt.Sscanf(line, "v %f %f %f", &x, &y, &z)
-				if err != nil {
-					panic(err)
-				}
-				model.vertices = append(model.vertices, Vertex{X: x, Y: y, Z: z})
+		switch {
+		case strings.HasPrefix(line, "v "):
+			var v Vec3
+			if _, err := fmt.Sscanf(line, "v %f %f %f", &v.X, &v.Y, &v.Z); err != nil {
+				return nil, fmt.Errorf("%s:%d: %w", filename, lineNo, err)
 			}
-		case 'f':
+			model.verts = append(model.verts, v)
+		case strings.HasPrefix(line, "f "):
 			// Формат грани: f v/vt/vn v/vt/vn v/vt/vn. Нам нужны только индексы
 			// вершин (первый номер каждой группы); индексы текстур и нормалей пропускаем.
-			var first, second, third int
+			var face [3]int
 			var vt, vn int
-			_, err := fmt.Sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d",
-				&first, &vt, &vn, &second, &vt, &vn, &third, &vt, &vn)
-			if err != nil {
-				panic(err)
+			if _, err := fmt.Sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d",
+				&face[0], &vt, &vn, &face[1], &vt, &vn, &face[2], &vt, &vn); err != nil {
+				return nil, fmt.Errorf("%s:%d: %w", filename, lineNo, err)
 			}
-			model.faces = append(model.faces, Face{first: first - 1, second: second - 1, third: third - 1})
+			for i := range face {
+				face[i]-- // в OBJ индексы с единицы
+			}
+			model.faces = append(model.faces, face)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return model
+	for i, face := range model.faces {
+		for _, v := range face {
+			if v < 0 || v >= len(model.verts) {
+				return nil, fmt.Errorf("%s: грань %d ссылается на несуществующую вершину %d", filename, i, v+1)
+			}
+		}
+	}
+	return model, nil
 }
+
+func (m *Model) nverts() int { return len(m.verts) }
+func (m *Model) nfaces() int { return len(m.faces) }
+
+func (m *Model) vert(i int) Vec3 { return m.verts[i] }
+
+// faceVert возвращает nthvert-ю вершину (0..2) грани iface.
+func (m *Model) faceVert(iface, nthvert int) Vec3 { return m.verts[m.faces[iface][nthvert]] }

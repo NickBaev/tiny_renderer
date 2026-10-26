@@ -71,6 +71,15 @@ func (img *TGAImage) Set(x, y int, c TGAColor) {
 	}
 }
 
+// Fill заливает всё изображение цветом c.
+func (img *TGAImage) Fill(c TGAColor) {
+	for y := 0; y < img.height; y++ {
+		for x := 0; x < img.width; x++ {
+			img.Set(x, y, c)
+		}
+	}
+}
+
 // Get возвращает цвет пикселя (x, y).
 func (img *TGAImage) Get(x, y int) TGAColor {
 	if x < 0 || y < 0 || x >= img.width || y >= img.height {
