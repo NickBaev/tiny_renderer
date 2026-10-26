@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 )
 
@@ -127,6 +130,30 @@ func (img *TGAImage) WriteTGAFile(filename string) error {
 	}
 	if _, err := w.Write(img.data); err != nil {
 		return fmt.Errorf("запись пикселей: %w", err)
+	}
+	return w.Flush()
+}
+
+// WritePNGFile сохраняет изображение в PNG-файл. Так как в TGA начало координат
+// в левом нижнем углу, строки переворачиваются по вертикали под формат PNG.
+func (img *TGAImage) WritePNGFile(filename string) error {
+	out := image.NewNRGBA(image.Rect(0, 0, img.width, img.height))
+	for y := 0; y < img.height; y++ {
+		for x := 0; x < img.width; x++ {
+			c := img.Get(x, y)
+			out.SetNRGBA(x, img.height-1-y, color.NRGBA{R: c.R, G: c.G, B: c.B, A: c.A})
+		}
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	if err := png.Encode(w, out); err != nil {
+		return fmt.Errorf("кодирование PNG: %w", err)
 	}
 	return w.Flush()
 }

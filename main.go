@@ -1,7 +1,7 @@
 package main
 
 import (
-	"os"
+	"math/rand/v2"
 	"runtime"
 	"sync"
 )
@@ -131,7 +131,7 @@ func lineX(x0, y0, x1, y1 int) []int {
 	return coords
 }
 
-func modernTriangle(x1, y1, x2, y2, x3, y3 int, framebuffer *TGAImage, color TGAColor) {
+func modernTriangle(x1, y1, z1, x2, y2, z2, x3, y3, z3 int, framebuffer *TGAImage, zbuffer *TGAImage, color TGAColor) {
 	bboxMinX := min(x1, x2, x3)
 	bboxMinY := min(y1, y2, y3)
 	bboxMaxX := max(x1, x2, x3)
@@ -139,7 +139,8 @@ func modernTriangle(x1, y1, x2, y2, x3, y3 int, framebuffer *TGAImage, color TGA
 
 	// Вырожденный (нулевая площадь) треугольник: иначе проверка "одного знака"
 	// залила бы весь bbox.
-	if edgeFunction(x3, y3, x1, y1, x2, y2) == 0 {
+	area := edgeFunction(x3, y3, x1, y1, x2, y2)
+	if area == 0 {
 		return
 	}
 
@@ -174,6 +175,15 @@ func modernTriangle(x1, y1, x2, y2, x3, y3 int, framebuffer *TGAImage, color TGA
 				edge0, edge1, edge2 := edge0Row, edge1Row, edge2Row
 				for x := bboxMinX; x <= bboxMaxX; x++ {
 					if edge0 >= 0 && edge1 >= 0 && edge2 >= 0 || edge0 <= 0 && edge1 <= 0 && edge2 <= 0 {
+						z := uint8((edge0*z3 + edge1*z1 + edge2*z2) / area)
+						if z <= zbuffer.Get(x, y).B {
+							edge0 += stepX0
+							edge1 += stepX1
+							edge2 += stepX2
+							continue
+						}
+						// color = TGAColor{z,z,z,255}
+						zbuffer.Set(x, y, TGAColor{z, z, z, z})
 						framebuffer.Set(x, y, color)
 					}
 					edge0 += stepX0
@@ -197,19 +207,137 @@ func edgeFunction(x, y, ax, ay, bx, by int) int {
 	return y*(bx-ax) + x*(ay-by) + ax*by - ay*bx
 }
 
+func modernTriangleGradient(x1, y1, x2, y2, x3, y3 int, framebuffer *TGAImage) {
+	bboxMinX := min(x1, x2, x3)
+	bboxMinY := min(y1, y2, y3)
+	bboxMaxX := max(x1, x2, x3)
+	bboxMaxY := max(y1, y2, y3)
+
+	// Вырожденный (нулевая площадь) треугольник: иначе проверка "одного знака"
+	// залила бы весь bbox.
+	area := edgeFunction(x3, y3, x1, y1, x2, y2)
+	if area == 0 {
+		return
+	}
+
+	// Приращения edge-функций на один шаг по x и по y. edgeFunction линейна, поэтому
+	// в горячем цикле остаются только сложения — без умножений. Считаются один раз,
+	// горутины их только читают.
+	stepX0, stepY0 := y1-y2, x2-x1
+	stepX1, stepY1 := y2-y3, x3-x2
+	stepX2, stepY2 := y3-y1, x1-x3
+
+	// Каждая горутина обрабатывает свой непрерывный диапазон строк (y).
+	// Строки не пересекаются, значит и байты в framebuffer.data не пересекаются,
+	// поэтому Set можно вызывать параллельно без блокировок.
+	rows := bboxMaxY - bboxMinY + 1
+	workers := runtime.NumCPU()
+	if workers > rows {
+		workers = rows
+	}
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		yStart := bboxMinY + w*rows/workers
+		yEnd := bboxMinY + (w+1)*rows/workers // не включительно
+		wg.Add(1)
+		go func(yStart, yEnd int) {
+			defer wg.Done()
+			// Каждая горутина стартует со своего угла (bboxMinX, yStart).
+			edge0Row := edgeFunction(bboxMinX, yStart, x1, y1, x2, y2)
+			edge1Row := edgeFunction(bboxMinX, yStart, x2, y2, x3, y3)
+			edge2Row := edgeFunction(bboxMinX, yStart, x3, y3, x1, y1)
+			for y := yStart; y < yEnd; y++ {
+				edge0, edge1, edge2 := edge0Row, edge1Row, edge2Row
+				for x := bboxMinX; x <= bboxMaxX; x++ {
+					if edge0 >= 0 && edge1 >= 0 && edge2 >= 0 || edge0 <= 0 && edge1 <= 0 && edge2 <= 0 {
+						b := uint8(float32(edge0) / float32(area) * 255)
+						g := uint8(float32(edge1) / float32(area) * 255)
+						r := uint8(float32(edge2) / float32(area) * 255)
+						framebuffer.Set(x, y, TGAColor{b, g, r, 255})
+					}
+					edge0 += stepX0
+					edge1 += stepX1
+					edge2 += stepX2
+				}
+				edge0Row += stepY0
+				edge1Row += stepY1
+				edge2Row += stepY2
+			}
+		}(yStart, yEnd)
+	}
+	wg.Wait()
+}
+
+func renderObjModelWireFrame(model *Model, framebuffer *TGAImage, color TGAColor) {
+	for _, face := range model.faces {
+		if len(model.vertices) <= face.first || len(model.vertices) <= face.second || len(model.vertices) <= face.third {
+			continue // Пропускаем некорректные грани
+		}
+		v0 := model.vertices[face.first]
+		v1 := model.vertices[face.second]
+		v2 := model.vertices[face.third]
+
+		v0normalized := Vertex{X: (v0.X + 1.0) * float64(framebuffer.Width()) / 2, Y: (v0.Y + 1.0) * float64(framebuffer.Height()) / 2, Z: v0.Z}
+		v1normalized := Vertex{X: (v1.X + 1.0) * float64(framebuffer.Width()) / 2, Y: (v1.Y + 1.0) * float64(framebuffer.Height()) / 2, Z: v1.Z}
+		v2normalized := Vertex{X: (v2.X + 1.0) * float64(framebuffer.Width()) / 2, Y: (v2.Y + 1.0) * float64(framebuffer.Height()) / 2, Z: v2.Z}
+
+		// Back-face culling: z-компонента (v1-v0) × (v2-v0) в экранных координатах.
+		// Знак показывает направление обхода вершин; грани, смотрящие от камеры,
+		// имеют обратный обход — их пропускаем.
+		cross := (v1normalized.X-v0normalized.X)*(v2normalized.Y-v0normalized.Y) -
+			(v2normalized.X-v0normalized.X)*(v1normalized.Y-v0normalized.Y)
+		if cross <= 0 {
+			continue
+		}
+
+		line(int(v0normalized.X), int(v0normalized.Y), int(v1normalized.X), int(v1normalized.Y), framebuffer, color)
+		line(int(v1normalized.X), int(v1normalized.Y), int(v2normalized.X), int(v2normalized.Y), framebuffer, color)
+		line(int(v2normalized.X), int(v2normalized.Y), int(v0normalized.X), int(v0normalized.Y), framebuffer, color)
+		// modernTriangle(int(v0normalized.X), int(v0normalized.Y), int(v1normalized.X), int(v1normalized.Y), int(v2normalized.X), int(v2normalized.Y), framebuffer, color)
+	}
+}
+
+func renderObjModelSurface(model *Model, framebuffer *TGAImage, zbuffer *TGAImage) {
+	for _, face := range model.faces {
+		if len(model.vertices) <= face.first || len(model.vertices) <= face.second || len(model.vertices) <= face.third {
+			continue // Пропускаем некорректные грани
+		}
+		v0 := model.vertices[face.first]
+		v1 := model.vertices[face.second]
+		v2 := model.vertices[face.third]
+
+		v0normalized := Vertex{X: (v0.X + 1.0) * float64(framebuffer.Width()) / 2, Y: (v0.Y + 1.0) * float64(framebuffer.Height()) / 2, Z: (v0.Z + 1.0) * 255 / 2}
+		v1normalized := Vertex{X: (v1.X + 1.0) * float64(framebuffer.Width()) / 2, Y: (v1.Y + 1.0) * float64(framebuffer.Height()) / 2, Z: (v1.Z + 1.0) * 255 / 2}
+		v2normalized := Vertex{X: (v2.X + 1.0) * float64(framebuffer.Width()) / 2, Y: (v2.Y + 1.0) * float64(framebuffer.Height()) / 2, Z: (v2.Z + 1.0) * 255 / 2}
+
+		// cross := (v1normalized.X-v0normalized.X)*(v2normalized.Y-v0normalized.Y) -
+		// 	(v2normalized.X-v0normalized.X)*(v1normalized.Y-v0normalized.Y)
+		// if cross <= 0 {
+		// 	continue
+		// }
+
+		color := NewColor(uint8(rand.IntN(256)), uint8(rand.IntN(256)), uint8(rand.IntN(256)), 255)
+		// color := NewColor(uint8((v0.Z+1.0)*127.5), uint8((v1.Z+1.0)*127.5), uint8((v2.Z+1.0)*127.5), 255)
+		modernTriangle(
+			int(v0normalized.X), int(v0normalized.Y), int(v0normalized.Z),
+			int(v1normalized.X), int(v1normalized.Y), int(v1normalized.Z),
+			int(v2normalized.X), int(v2normalized.Y), int(v2normalized.Z),
+			framebuffer, zbuffer, color)
+		// modernTriangle(int(v0normalized.X), int(v0normalized.Y), int(v1normalized.X), int(v1normalized.Y), int(v2normalized.X), int(v2normalized.Y), framebuffer, color)
+	}
+}
+
 func main() {
 	const (
-		width  = 64
-		height = 64
+		width  = 1000
+		height = 1000
 	)
+
 	framebuffer := NewTGAImage(width, height, RGB)
+	zbuffer := NewTGAImage(width, height, Grayscale)
+	model := readModel("diablo3_pose.obj")
 
-	modernTriangle(10, 30, 50, 20, 30, 50, framebuffer, white)
-
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		panic(err)
-	}
-	if err := framebuffer.WriteTGAFile(outDir + "/framebuffer.tga"); err != nil {
-		panic(err)
-	}
+	renderObjModelSurface(model, framebuffer, zbuffer)
+	framebuffer.WritePNGFile(outDir + "/diablo3_culled.png")
 }
