@@ -6,8 +6,6 @@ import (
 	"os"
 )
 
-const outDir = "out"
-
 // RandomShader красит каждый треугольник своим случайным цветом.
 type RandomShader struct {
 	gl    *Renderer
@@ -51,32 +49,21 @@ func main() {
 		files = []string{"diablo3_pose.obj"}
 	}
 
-	gl := NewRenderer(width, height)
-	gl.LookAt(eye, center, up)
-	gl.SetPerspective(eye.Sub(center).Norm())
-	gl.SetViewport(width/16, height/16, width*7/8, height*7/8)
-	gl.Framebuffer.Fill(NewColor(177, 195, 209, 255))
-
+	models := make([]*Model, 0, len(files))
 	for _, file := range files {
 		model, err := readModel(file)
 		if err != nil {
 			log.Fatal(err)
 		}
-		for f := 0; f < model.nfaces(); f++ {
-			triangle := [3]Vec3{model.faceVert(f, 0), model.faceVert(f, 1), model.faceVert(f, 2)}
-			shader := NewPhongShader(lightDirection, cameraDirection, triangle)
-			var clip [3]Vec4
-			for i, vertex := range triangle {
-				clip[i] = gl.Perspective.MulVec(gl.ModelView.MulVec(vertex.XYZ1()))
-			}
-			gl.Rasterize(clip, shader)
-		}
+		models = append(models, model)
 	}
 
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		log.Fatal(err)
-	}
-	if err := gl.Framebuffer.WritePNGFile(outDir + "/framebuffer.png"); err != nil {
+	gl := NewRenderer(width, height)
+	gl.LookAt(eye, center, up)
+	gl.SetPerspective(eye.Sub(center).Norm())
+	gl.SetViewport(width/16, height/16, width*7/8, height*7/8)
+
+	if err := show(gl, models, cameraDirection, eye, lightDirection); err != nil {
 		log.Fatal(err)
 	}
 }
