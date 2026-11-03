@@ -8,24 +8,34 @@ type PhongShader struct {
 	cameraDirection Vec3
 	cameraPosition  Vec3
 	triangle        [3]Vec3
+	normals         [3]Vec3
 }
 
-const MATERIAL_EXPONENT = 4
+const MATERIAL_EXPONENT = 16
 
-func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triangle [3]Vec3) *PhongShader {
+func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triangle, normals [3]Vec3) *PhongShader {
 	return &PhongShader{
 		lightDirection:  lightDirection,
 		cameraDirection: cameraDirection,
 		cameraPosition:  cameraPosition,
 		triangle:        triangle,
+		normals:         normals,
 	}
 }
 
-func (s *PhongShader) Fragment(frag Vec3) (discard bool, color TGAColor) {
+func (s *PhongShader) Fragment(bar Vec3) (discard bool, color TGAColor) {
+	// world position
+	frag := s.triangle[0].Scale(bar.X).
+		Add(s.triangle[1].Scale(bar.Y)).
+		Add(s.triangle[2].Scale(bar.Z))
+
+	//normals
+	n := s.normals[0].Scale(bar.X).Add(s.normals[1].Scale(bar.Y)).Add(s.normals[2].Scale(bar.Z)).Normalized()
+	// ab := s.triangle[1].Sub(s.triangle[0])
+	// ac := s.triangle[2].Sub(s.triangle[0])
+	// n := ab.Cross(ac).Normalized()
+
 	// difuse term
-	ab := s.triangle[1].Sub(s.triangle[0])
-	ac := s.triangle[2].Sub(s.triangle[0])
-	n := ab.Cross(ac).Normalized()
 	cosDiffuse := n.Dot(s.lightDirection)
 	diffuse := max(0, cosDiffuse)
 

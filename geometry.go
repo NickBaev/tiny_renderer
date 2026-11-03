@@ -15,6 +15,10 @@ func (a Vec3) Dot(b Vec3) float64   { return a.X*b.X + a.Y*b.Y + a.Z*b.Z }
 func (a Vec3) Norm() float64        { return math.Sqrt(a.Dot(a)) }
 func (a Vec3) Normalized() Vec3     { return a.Scale(1 / a.Norm()) }
 func (a Vec3) XYZ1() Vec4           { return Vec4{a.X, a.Y, a.Z, 1} }
+func (a Vec3) RotateY(angle float64) Vec3 {
+	sin, cos := math.Sincos(angle)
+	return Vec3{a.X*cos + a.Z*sin, a.Y, a.Z*cos - a.X*sin}
+}
 func (a Vec4) Scale(k float64) Vec4 { return Vec4{a.X * k, a.Y * k, a.Z * k, a.W * k} }
 func (a Vec4) XY() Vec2             { return Vec2{a.X, a.Y} }
 func (a Vec4) XYZ() Vec3            { return Vec3{a.X, a.Y, a.Z} }

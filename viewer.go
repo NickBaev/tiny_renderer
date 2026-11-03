@@ -3,8 +3,9 @@ package main
 import "github.com/hajimehoshi/ebiten/v2"
 
 const (
-	targetFPS  = 60
-	lightZStep = 0.05
+	targetFPS    = 60
+	lightZStep   = 0.05
+	rotationStep = 0.03
 )
 
 type game struct {
@@ -14,6 +15,7 @@ type game struct {
 	cameraPosition  Vec3
 	lightDirection  Vec3
 	lightZ          float64
+	modelAngle      float64
 	image           *ebiten.Image
 	pixels          []byte
 }
@@ -38,6 +40,13 @@ func show(renderer *Renderer, models []*Model, cameraDirection, cameraPosition, 
 }
 
 func (g *game) Update() error {
+	if ebiten.IsKeyPressed(ebiten.KeyArrowLeft) {
+		g.modelAngle -= rotationStep
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyArrowRight) {
+		g.modelAngle += rotationStep
+	}
+
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		g.lightZ += lightZStep
 	}
@@ -92,7 +101,12 @@ func (g *game) renderFrame() {
 	for _, model := range g.models {
 		for f := 0; f < model.nfaces(); f++ {
 			triangle := [3]Vec3{model.faceVert(f, 0), model.faceVert(f, 1), model.faceVert(f, 2)}
-			shader := NewPhongShader(g.lightDirection, g.cameraDirection, g.cameraPosition, triangle)
+			normals := [3]Vec3{model.faceNormal(f, 0), model.faceNormal(f, 1), model.faceNormal(f, 2)}
+			for i := range triangle {
+				triangle[i] = triangle[i].RotateY(g.modelAngle)
+				normals[i] = normals[i].RotateY(g.modelAngle)
+			}
+			shader := NewPhongShader(g.lightDirection, g.cameraDirection, g.cameraPosition, triangle, normals)
 			var clip [3]Vec4
 			for i, vertex := range triangle {
 				clip[i] = gl.Perspective.MulVec(gl.ModelView.MulVec(vertex.XYZ1()))
