@@ -43,6 +43,8 @@ func main() {
 		center = Vec3{0, 0, 0}  // куда смотрит камера
 		up     = Vec3{0, 1, 0}  // вектор "вверх" в мировых координатах
 	)
+	cameraDirection := eye.Sub(center).Normalized()
+	lightDirection := Vec3{1, 1, 1}.Normalized()
 
 	files := os.Args[1:]
 	if len(files) == 0 {
@@ -61,8 +63,12 @@ func main() {
 			log.Fatal(err)
 		}
 		for f := 0; f < model.nfaces(); f++ {
-			shader := NewRandomShader(gl, model)
-			clip := [3]Vec4{shader.Vertex(f, 0), shader.Vertex(f, 1), shader.Vertex(f, 2)}
+			triangle := [3]Vec3{model.faceVert(f, 0), model.faceVert(f, 1), model.faceVert(f, 2)}
+			shader := NewPhongShader(lightDirection, cameraDirection, triangle)
+			var clip [3]Vec4
+			for i, vertex := range triangle {
+				clip[i] = gl.Perspective.MulVec(gl.ModelView.MulVec(vertex.XYZ1()))
+			}
 			gl.Rasterize(clip, shader)
 		}
 	}
