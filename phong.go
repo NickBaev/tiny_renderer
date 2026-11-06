@@ -11,11 +11,16 @@ type PhongShader struct {
 	normals         [3]Vec3
 	uvs             [3]Vec2
 	texture         *TGAImage
+	shadow          *Renderer
+	lightTransform  Mat4
 }
 
-const MATERIAL_EXPONENT = 16
+const (
+	MATERIAL_EXPONENT = 16
+	shadowBias        = 0.005
+)
 
-func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triangle, normals [3]Vec3, uvs [3]Vec2, texture *TGAImage) *PhongShader {
+func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triangle, normals [3]Vec3, uvs [3]Vec2, texture *TGAImage, shadow *Renderer) *PhongShader {
 	return &PhongShader{
 		lightDirection:  lightDirection,
 		cameraDirection: cameraDirection,
@@ -24,7 +29,21 @@ func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triang
 		normals:         normals,
 		uvs:             uvs,
 		texture:         texture,
+		shadow:          shadow,
+		lightTransform:  shadow.Perspective.Mul(shadow.ModelView),
 	}
+}
+
+func (s *PhongShader) inShadow(position Vec3) bool {
+	clip := s.lightTransform.MulVec(position.XYZ1())
+	ndc := clip.Scale(1 / clip.W)
+	screen := s.shadow.Viewport.MulVec(ndc)
+	x, y := int(screen.X), int(screen.Y)
+	if x < 0 || x >= s.shadow.Framebuffer.Width() || y < 0 || y >= s.shadow.Framebuffer.Height() {
+		return false
+	}
+	depth := s.shadow.zbuffer[x+y*s.shadow.Framebuffer.Width()]
+	return ndc.Z < depth-shadowBias
 }
 
 func (s *PhongShader) Fragment(bar Vec3) (discard bool, color TGAColor) {
@@ -48,6 +67,10 @@ func (s *PhongShader) Fragment(bar Vec3) (discard bool, color TGAColor) {
 	viewDirection := s.cameraPosition.Sub(frag).Normalized()
 	cosSpecular := reflect.Dot(viewDirection)
 	specular := math.Pow(max(0, cosSpecular), MATERIAL_EXPONENT)
+	if s.inShadow(frag) {
+		diffuse = 0
+		specular = 0
+	}
 
 	totalLight := min(255, (specular+diffuse)*255)
 

@@ -61,6 +61,16 @@ func (r *Renderer) SetPerspective(f float64) {
 	}
 }
 
+// SetOrthographic оставляет координаты камеры без перспективного деления.
+func (r *Renderer) SetOrthographic() {
+	r.Perspective = Mat4{
+		{1, 0, 0, 0},
+		{0, 1, 0, 0},
+		{0, 0, 1, 0},
+		{0, 0, 0, 1},
+	}
+}
+
 // SetViewport отображает куб [-1,1]³ в прямоугольник экрана [x,x+w]×[y,y+h].
 func (r *Renderer) SetViewport(x, y, w, h int) {
 	r.Viewport = Mat4{

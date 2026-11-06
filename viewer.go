@@ -1,6 +1,10 @@
 package main
 
-import "github.com/hajimehoshi/ebiten/v2"
+import (
+	"math"
+
+	"github.com/hajimehoshi/ebiten/v2"
+)
 
 const (
 	targetFPS    = 60
@@ -10,6 +14,7 @@ const (
 
 type game struct {
 	renderer        *Renderer
+	shadowRenderer  *Renderer
 	models          []*Model
 	texture         *TGAImage
 	cameraDirection Vec3
@@ -25,6 +30,7 @@ func show(renderer *Renderer, models []*Model, texture *TGAImage, cameraDirectio
 	width, height := renderer.Framebuffer.Width(), renderer.Framebuffer.Height()
 	g := &game{
 		renderer:        renderer,
+		shadowRenderer:  NewRenderer(width, height),
 		models:          models,
 		texture:         texture,
 		cameraDirection: cameraDirection,
@@ -93,7 +99,41 @@ func (g *game) Layout(_, _ int) (int, int) {
 	return g.renderer.Framebuffer.Width(), g.renderer.Framebuffer.Height()
 }
 
+type depthShader struct{}
+
+func (depthShader) Fragment(Vec3) (bool, TGAColor) {
+	return false, TGAColor{}
+}
+
+func (g *game) renderShadowMap() {
+	gl := g.shadowRenderer
+	up := Vec3{0, 1, 0}
+	if math.Abs(g.lightDirection.Dot(up)) > 0.99 {
+		up = Vec3{0, 0, 1}
+	}
+	gl.LookAt(g.lightDirection.Scale(3), Vec3{}, up)
+	gl.SetOrthographic()
+	gl.SetViewport(0, 0, gl.Framebuffer.Width(), gl.Framebuffer.Height())
+	for i := range gl.zbuffer {
+		gl.zbuffer[i] = -1000
+	}
+
+	for _, model := range g.models {
+		for f := 0; f < model.nfaces(); f++ {
+			triangle := [3]Vec3{model.faceVert(f, 0), model.faceVert(f, 1), model.faceVert(f, 2)}
+			var clip [3]Vec4
+			for i, vertex := range triangle {
+				vertex = vertex.RotateY(g.modelAngle)
+				clip[i] = gl.Perspective.MulVec(gl.ModelView.MulVec(vertex.XYZ1()))
+			}
+			gl.Rasterize(clip, depthShader{})
+		}
+	}
+}
+
 func (g *game) renderFrame() {
+	g.renderShadowMap()
+
 	gl := g.renderer
 	gl.Framebuffer.Fill(NewColor(177, 195, 209, 255))
 	for i := range gl.zbuffer {
@@ -109,7 +149,7 @@ func (g *game) renderFrame() {
 				triangle[i] = triangle[i].RotateY(g.modelAngle)
 				normals[i] = normals[i].RotateY(g.modelAngle)
 			}
-			shader := NewPhongShader(g.lightDirection, g.cameraDirection, g.cameraPosition, triangle, normals, uvs, g.texture)
+			shader := NewPhongShader(g.lightDirection, g.cameraDirection, g.cameraPosition, triangle, normals, uvs, g.texture, g.shadowRenderer)
 			var clip [3]Vec4
 			for i, vertex := range triangle {
 				clip[i] = gl.Perspective.MulVec(gl.ModelView.MulVec(vertex.XYZ1()))
