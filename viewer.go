@@ -11,6 +11,7 @@ const (
 type game struct {
 	renderer        *Renderer
 	models          []*Model
+	texture         *TGAImage
 	cameraDirection Vec3
 	cameraPosition  Vec3
 	lightDirection  Vec3
@@ -20,11 +21,12 @@ type game struct {
 	pixels          []byte
 }
 
-func show(renderer *Renderer, models []*Model, cameraDirection, cameraPosition, lightDirection Vec3) error {
+func show(renderer *Renderer, models []*Model, texture *TGAImage, cameraDirection, cameraPosition, lightDirection Vec3) error {
 	width, height := renderer.Framebuffer.Width(), renderer.Framebuffer.Height()
 	g := &game{
 		renderer:        renderer,
 		models:          models,
+		texture:         texture,
 		cameraDirection: cameraDirection,
 		cameraPosition:  cameraPosition,
 		lightDirection:  lightDirection,
@@ -102,11 +104,12 @@ func (g *game) renderFrame() {
 		for f := 0; f < model.nfaces(); f++ {
 			triangle := [3]Vec3{model.faceVert(f, 0), model.faceVert(f, 1), model.faceVert(f, 2)}
 			normals := [3]Vec3{model.faceNormal(f, 0), model.faceNormal(f, 1), model.faceNormal(f, 2)}
+			uvs := [3]Vec2{model.faceUV(f, 0), model.faceUV(f, 1), model.faceUV(f, 2)}
 			for i := range triangle {
 				triangle[i] = triangle[i].RotateY(g.modelAngle)
 				normals[i] = normals[i].RotateY(g.modelAngle)
 			}
-			shader := NewPhongShader(g.lightDirection, g.cameraDirection, g.cameraPosition, triangle, normals)
+			shader := NewPhongShader(g.lightDirection, g.cameraDirection, g.cameraPosition, triangle, normals, uvs, g.texture)
 			var clip [3]Vec4
 			for i, vertex := range triangle {
 				clip[i] = gl.Perspective.MulVec(gl.ModelView.MulVec(vertex.XYZ1()))

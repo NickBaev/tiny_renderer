@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 )
 
@@ -113,6 +114,113 @@ type tgaHeader struct {
 	Height          uint16
 	BitsPerPixel    uint8
 	ImageDescriptor uint8
+}
+
+// ReadTGAFile загружает несжатое или RLE-сжатое изображение Grayscale/RGB/RGBA.
+func ReadTGAFile(filename string) (*TGAImage, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("открытие TGA: %w", err)
+	}
+	defer f.Close()
+
+	r := bufio.NewReader(f)
+	var header tgaHeader
+	if err := binary.Read(r, binary.LittleEndian, &header); err != nil {
+		return nil, fmt.Errorf("чтение заголовка TGA: %w", err)
+	}
+	if header.Width == 0 || header.Height == 0 {
+		return nil, fmt.Errorf("некорректный размер TGA: %d×%d", header.Width, header.Height)
+	}
+	if header.ColorMapType != 0 {
+		return nil, fmt.Errorf("TGA с цветовой палитрой не поддерживается")
+	}
+	if header.ImageDescriptor&0x10 != 0 {
+		return nil, fmt.Errorf("TGA с направлением справа налево не поддерживается")
+	}
+
+	var format Format
+	switch header.BitsPerPixel {
+	case 8:
+		format = Grayscale
+	case 24:
+		format = RGB
+	case 32:
+		format = RGBA
+	default:
+		return nil, fmt.Errorf("глубина TGA %d бит не поддерживается", header.BitsPerPixel)
+	}
+
+	switch header.DataTypeCode {
+	case 2, 10:
+		if format == Grayscale {
+			return nil, fmt.Errorf("несоответствие типа и глубины TGA")
+		}
+	case 3, 11:
+		if format != Grayscale {
+			return nil, fmt.Errorf("несоответствие типа и глубины TGA")
+		}
+	default:
+		return nil, fmt.Errorf("тип TGA %d не поддерживается", header.DataTypeCode)
+	}
+
+	if _, err := io.CopyN(io.Discard, r, int64(header.IDLength)); err != nil {
+		return nil, fmt.Errorf("пропуск идентификатора TGA: %w", err)
+	}
+
+	img := NewTGAImage(int(header.Width), int(header.Height), format)
+	if header.DataTypeCode == 10 || header.DataTypeCode == 11 {
+		if err := readTGARLE(r, img.data, int(format)); err != nil {
+			return nil, fmt.Errorf("распаковка TGA: %w", err)
+		}
+	} else if _, err := io.ReadFull(r, img.data); err != nil {
+		return nil, fmt.Errorf("чтение пикселей TGA: %w", err)
+	}
+
+	// При верхнем начале координат переворачиваем строки во внутренний формат снизу вверх.
+	if header.ImageDescriptor&0x20 != 0 {
+		rowSize := img.width * int(img.format)
+		row := make([]byte, rowSize)
+		for y := 0; y < img.height/2; y++ {
+			top := y * rowSize
+			bottom := (img.height - 1 - y) * rowSize
+			copy(row, img.data[top:top+rowSize])
+			copy(img.data[top:top+rowSize], img.data[bottom:bottom+rowSize])
+			copy(img.data[bottom:bottom+rowSize], row)
+		}
+	}
+	return img, nil
+}
+
+func readTGARLE(r io.Reader, data []byte, bytesPerPixel int) error {
+	pixel := make([]byte, bytesPerPixel)
+	for offset := 0; offset < len(data); {
+		var packet uint8
+		if err := binary.Read(r, binary.LittleEndian, &packet); err != nil {
+			return err
+		}
+		count := int(packet&0x7f) + 1
+		size := count * bytesPerPixel
+		if size > len(data)-offset {
+			return fmt.Errorf("RLE-пакет выходит за границы изображения")
+		}
+
+		if packet&0x80 != 0 {
+			if _, err := io.ReadFull(r, pixel); err != nil {
+				return err
+			}
+			for range count {
+				copy(data[offset:offset+bytesPerPixel], pixel)
+				offset += bytesPerPixel
+			}
+		} else {
+			if _, err := io.ReadFull(r, data[offset:offset+size]); err != nil {
+				return err
+			}
+			offset += size
+		}
+	}
+	return nil
 }
 
 // WriteTGAFile сохраняет изображение в несжатый TGA-файл.

@@ -58,12 +58,17 @@ func main() {
 		models = append(models, model)
 	}
 
+	texture, err := ReadTGAFile("diablo3_pose_diffuse.tga")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	gl := NewRenderer(width, height)
 	gl.LookAt(eye, center, up)
 	gl.SetPerspective(eye.Sub(center).Norm())
 	gl.SetViewport(width/16, height/16, width*7/8, height*7/8)
 
-	if err := show(gl, models, cameraDirection, eye, lightDirection); err != nil {
+	if err := show(gl, models, texture, cameraDirection, eye, lightDirection); err != nil {
 		log.Fatal(err)
 	}
 }

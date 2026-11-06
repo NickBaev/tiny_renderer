@@ -9,17 +9,21 @@ type PhongShader struct {
 	cameraPosition  Vec3
 	triangle        [3]Vec3
 	normals         [3]Vec3
+	uvs             [3]Vec2
+	texture         *TGAImage
 }
 
 const MATERIAL_EXPONENT = 16
 
-func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triangle, normals [3]Vec3) *PhongShader {
+func NewPhongShader(lightDirection, cameraDirection, cameraPosition Vec3, triangle, normals [3]Vec3, uvs [3]Vec2, texture *TGAImage) *PhongShader {
 	return &PhongShader{
 		lightDirection:  lightDirection,
 		cameraDirection: cameraDirection,
 		cameraPosition:  cameraPosition,
 		triangle:        triangle,
 		normals:         normals,
+		uvs:             uvs,
+		texture:         texture,
 	}
 }
 
@@ -47,5 +51,20 @@ func (s *PhongShader) Fragment(bar Vec3) (discard bool, color TGAColor) {
 
 	totalLight := min(255, (specular+diffuse)*255)
 
-	return false, TGAColor{uint8(totalLight), uint8(totalLight), uint8(totalLight), 255}
+	//texture
+	u := s.uvs[0].X*bar.X + s.uvs[1].X*bar.Y + s.uvs[2].X*bar.Z
+	v := s.uvs[0].Y*bar.X + s.uvs[1].Y*bar.Y + s.uvs[2].Y*bar.Z
+	x := min(s.texture.Width()-1, max(0, int(u*float64(s.texture.Width()))))
+	y := min(s.texture.Height()-1, max(0, int(v*float64(s.texture.Height()))))
+
+	textureColor := s.texture.Get(x, y)
+	lightIntensity := totalLight / 255
+
+	finalColor := TGAColor{
+		B: uint8(float64(textureColor.B) * lightIntensity),
+		G: uint8(float64(textureColor.G) * lightIntensity),
+		R: uint8(float64(textureColor.R) * lightIntensity),
+		A: 255,
+	}
+	return false, finalColor
 }

@@ -10,8 +10,10 @@ import (
 type Model struct {
 	verts         []Vec3   // массив вершин
 	normals       []Vec3   // массив нормалей
+	uvs           []Vec2   // массив текстурных координат
 	faces         [][3]int // индексы вершин каждого треугольника
 	normalIndices [][3]int // индексы нормалей каждого треугольника
+	uvIndices     [][3]int // индексы текстурных координат каждого треугольника
 }
 
 func readModel(filename string) (*Model, error) {
@@ -38,22 +40,29 @@ func readModel(filename string) (*Model, error) {
 				return nil, fmt.Errorf("%s:%d: %w", filename, lineNo, err)
 			}
 			model.normals = append(model.normals, n)
+		case strings.HasPrefix(line, "vt "):
+			var uv Vec2
+			if _, err := fmt.Sscanf(line, "vt %f %f", &uv.X, &uv.Y); err != nil {
+				return nil, fmt.Errorf("%s:%d: %w", filename, lineNo, err)
+			}
+			model.uvs = append(model.uvs, uv)
 		case strings.HasPrefix(line, "f "):
-			// Формат грани: f v/vt/vn v/vt/vn v/vt/vn. Индексы текстур пропускаем.
-			var face, normalFace [3]int
-			var vt int
+			// Формат грани: f v/vt/vn v/vt/vn v/vt/vn.
+			var face, normalFace, uvFace [3]int
 			if _, err := fmt.Sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d",
-				&face[0], &vt, &normalFace[0],
-				&face[1], &vt, &normalFace[1],
-				&face[2], &vt, &normalFace[2]); err != nil {
+				&face[0], &uvFace[0], &normalFace[0],
+				&face[1], &uvFace[1], &normalFace[1],
+				&face[2], &uvFace[2], &normalFace[2]); err != nil {
 				return nil, fmt.Errorf("%s:%d: %w", filename, lineNo, err)
 			}
 			for i := range face {
 				face[i]--       // в OBJ индексы с единицы
 				normalFace[i]-- // в OBJ индексы с единицы
+				uvFace[i]--     // в OBJ индексы с единицы
 			}
 			model.faces = append(model.faces, face)
 			model.normalIndices = append(model.normalIndices, normalFace)
+			model.uvIndices = append(model.uvIndices, uvFace)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -74,6 +83,13 @@ func readModel(filename string) (*Model, error) {
 			}
 		}
 	}
+	for i, face := range model.uvIndices {
+		for _, uv := range face {
+			if uv < 0 || uv >= len(model.uvs) {
+				return nil, fmt.Errorf("%s: грань %d ссылается на несуществующие текстурные координаты %d", filename, i, uv+1)
+			}
+		}
+	}
 	return model, nil
 }
 
@@ -88,4 +104,9 @@ func (m *Model) faceVert(iface, nthvert int) Vec3 { return m.verts[m.faces[iface
 // faceNormal возвращает нормаль nthvert-й вершины (0..2) грани iface.
 func (m *Model) faceNormal(iface, nthvert int) Vec3 {
 	return m.normals[m.normalIndices[iface][nthvert]]
+}
+
+// faceUV возвращает текстурные координаты nthvert-й вершины (0..2) грани iface.
+func (m *Model) faceUV(iface, nthvert int) Vec2 {
+	return m.uvs[m.uvIndices[iface][nthvert]]
 }
